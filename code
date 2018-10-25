@@ -1,0 +1,584 @@
+
+
+# Necessary packages to import
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+##### For starters #####
+# First off, we need to load the dataset from our working directory
+coffeebardataset = pd.read_csv("Coffeebar_2013-2017.csv", delimiter=";", header=0)
+# We shall let Python know that the TIME variable comprises a date and an hour
+coffeebardataset['TIME'] = pd.to_datetime(coffeebardataset.TIME)
+# Let us now check that the TIME variable was successfully converted to a datetime variable
+coffeebardataset.dtypes
+# We shall now resort to functions which are found in the datetime package which will let us extract the date,
+# time and year, and assign them to distinct variables
+coffeebardataset['DATE'] = coffeebardataset.TIME.dt.date
+coffeebardataset['YEAR'] = coffeebardataset.TIME.dt.year
+coffeebardataset['TIME'] = coffeebardataset.TIME.dt.time
+
+# We will now replace empty values with "no_food" when the customer only orders a drink, thus not ordering any food
+coffeebardataset = coffeebardataset.replace(np.nan, 'no_food', regex=True)
+
+##### Part one #####
+# We will start by listing all of the food and drinks for sale in the coffee bar
+# Let us store our results in a dataframe for both food and drinks
+list_drinks = [set(coffeebardataset['DRINKS'])]
+DRINKSFORSALE = pd.DataFrame(list_drinks)
+DRINKSFORSALE = pd.DataFrame.transpose(DRINKSFORSALE)
+DRINKSFORSALE.columns = ['DRINKS_FOR_SALE']
+print(DRINKSFORSALE)
+
+list_food = [set(coffeebardataset['FOOD'])]
+FOODFORSALE = pd.DataFrame(list_food)
+FOODFORSALE = pd.DataFrame.transpose(FOODFORSALE)
+FOODFORSALE.columns = ['FOOD_FOR_SALE']
+print(FOODFORSALE)
+
+# number of customers in the coffee bar.
+# We shall use the command "nunique" so as to count unique customers, i.e. we do not want to count the same
+# customer twice
+number_unique_customers = coffeebardataset['CUSTOMER'].nunique()
+print(number_unique_customers)
+# In total, 247 988 unique customers have visited the coffee bar
+
+##### Plotting the graphs #####
+# Let us have a look at how the number of customers has changed over time
+number_of_customers_per_year = pd.DataFrame(coffeebardataset.groupby('YEAR').CUSTOMER.size())
+plt.plot(number_of_customers_per_year)
+plt.xlabel('Time')
+plt.ylabel('Number of customers')
+plt.title('Number of customers per year')
+plt.savefig('Number_of_customers_per_year.png')
+
+# Bar chart for drink sales
+DRINKSCARD = coffeebardataset[['YEAR', 'DRINKS']]
+DRINKSCARD.groupby(['YEAR', 'DRINKS']).size().plot(x=None, y=None, kind='bar', title="Drink sales by year", legend=False, stacked=False, use_index=True)
+plt.savefig('DrinksConsumption.png')
+plt.show()
+
+# Bar chart for food sales
+FOODCARD = coffeebardataset[['YEAR', 'FOOD']]
+FOODCARD.groupby(['YEAR', 'FOOD']).size().plot(x=None, y=None, kind='bar', title="Food sales by year", legend=False, stacked=False, use_index=True)
+plt.savefig('FoodConsumption.png')
+plt.show()
+
+##### Determining probabilities #####
+# In order to make data and result handling simpler, we shall use pd.DataFrame in the rest of the code
+# Let us now count the number of orders by time slot
+count = pd.DataFrame(coffeebardataset.groupby(['TIME']).size())
+# We also need to rename the variable
+count.columns = pd.DataFrame(['HourlyOrders'])
+
+# Up to now, the index in count was TIME, but we would like to use it as a column
+# In order to do so, we shall add TIME to count
+# This way, we will be able to use it as a variable to merge with
+count['TIME'] = count.index.tolist()
+# Following this step, TIME is now a count variable
+# Let us now redefine the index
+count.index = range(len(count))
+# We will now merge coffeebardataset and count with TIME.
+# coffeebardataset has now the column "HourlyOrders"
+coffeebardataset = pd.merge(coffeebardataset, count, on='TIME')
+# It results that every time slot in the dataset comes up 1825 times.
+
+# Let us now compute the number of drink orders by time slot
+count_drinkable = pd.DataFrame(coffeebardataset.groupby(['DRINKS', 'TIME']).size())
+# We need to rename the variable
+count_drinkable.columns = ['PROBABILITIES']
+# We also need to construct two new variables denoted by DRINKS and TIME which we will use later on for merging
+count_drinkable.index = count_drinkable.index.set_names(['DRINKS', 'TIME'])
+count_drinkable.reset_index(inplace=True)
+# Merging count and count_drinkable into TIME
+count_drinkable = pd.merge(count_drinkable, count, on='TIME')
+# Finally let us simply rename the variables
+count_drinkable.columns = ['DRINKS', 'TIME', 'COUNT_DRINK', 'NUMBER_ORDERS']
+
+# To begin with, we shall convert the variable NUMBER_ORDERS to a float
+count_drinkable['NUMBER_ORDERS'] = count_drinkable['NUMBER_ORDERS'].astype(float)
+# Moving now onto probability computation
+# Number of drinks at one given time slot divided by the number of orders at this same given time slot
+avg_drinkable = pd.DataFrame(count_drinkable['COUNT_DRINK']/count_drinkable['NUMBER_ORDERS'])
+# Let us now include this probability into the DataFrame
+count_drinkable['avg_drinkable'] = pd.DataFrame(avg_drinkable, index=count_drinkable.index)
+# From now on, count_drinkable will have the column avg_drinkable
+
+# For sheer plainness reasons, we shall transform the dataframe into a shorter but wider one
+count_drinkable = pd.DataFrame(count_drinkable.pivot(index='TIME', columns='DRINKS', values='avg_drinkable'))
+# To ensure that the law of total probability, i.e. that the sum of all probabilities adds up to one
+# We shall add an extra column which accounts for the sum of all previous columns
+count_drinkable['sum'] = pd.DataFrame(count_drinkable['coffee'] + count_drinkable['soda'] + count_drinkable['frappucino'] + count_drinkable['water'] + count_drinkable['tea'] + count_drinkable['milkshake'])
+# This line of code lets us know that this sum is always equal to one, i.e. that the law of total probability holds
+# Thus, we can proceed further
+
+# In order to deal with food orders, we will use the same line of thought in what follows
+# Let us now count the number of food orders by time slot
+count_food = pd.DataFrame(coffeebardataset.groupby(['FOOD', 'TIME']).size())
+# We need to rename the variable
+count_food.columns = ['COUNT_FOOD']
+# We shall add TIME for merging it later on
+count_food.index = count_food.index.set_names(['FOOD', 'TIME'])
+# Let us redefine the index as follows
+count_food.reset_index(inplace=True)
+
+# Let us merge both count_food and count with TIME
+count_food = pd.merge(count_food, count, on='TIME')
+# We also need to rename the variables as follows
+count_food.columns = ['FOOD', 'TIME', 'COUNT_FOOD', 'NUMBER_ORDERS']
+# Once again, convert the variable NUMBER_ORDERS to a float
+count_food['NUMBER_ORDERS'] = count_food['NUMBER_ORDERS'].astype(float)
+# Moving now onto probability computation
+# Number of food at one given time slot divided by the number of orders at this same given time slot
+avg_food = pd.DataFrame(count_food['COUNT_FOOD']/count_food['NUMBER_ORDERS'])
+# Let us now include this probability into the DataFrame
+count_food['avg_food'] = pd.DataFrame(avg_food, index=count_food.index)
+count_drinkable['avg_drinkable'] = pd.DataFrame(avg_drinkable, index=count_drinkable.index)
+# From now on, count_food will also comprise the column avg_food
+
+# For sheer plainness reasons, we shall transform the dataframe into a shorter but wider one
+count_food= pd.DataFrame(count_food.pivot(index='TIME', columns='FOOD', values='avg_food'))
+# As carried out previously, we once again check for the law of total probability
+# i.e. that the sum of all probabilities adds up to one
+# Before anything else, we shall replace all occurrences of nan by 0
+# because nan implies that no food was ordered by the customer
+count_food = count_food.replace(np.nan, '0', regex=True)
+# Let us now check for the type of variables
+count_food.dtypes
+# This lets us know that all variables are objects but we actually want to deal with floats
+# Hence we convert them to floats
+count_food = count_food.astype(float)
+# Upon checking again for the type of variables, we can see that they are now all floats
+count_food.dtypes
+# We shall add an extra column which accounts for the sum of all previous columns
+count_food['sum'] = pd.DataFrame(count_food['muffin'] + count_food['cookie'] + count_food['pie'] + count_food['sandwich'] + count_food['nothing'])
+# This line of code lets us know that this sum is always equal to one, i.e. that the law of total probability holds
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Necessary packages to import
+from random import random
+import numpy as np
+import pandas as pd
+
+
+##### Part two #####
+# Creating different classes present in the model
+class Customer(object):
+    def __init__(self, type, subtype, tip, customerid, budget):
+        self.customerid = customerid
+        self.type = type
+        self.subtype = subtype
+        self.tip = tip
+        self.budget = budget
+
+# Creating class for one time customers, setting their budget to 100
+
+class One_time_customer(Customer):
+    def __init__(self, customerid, budget):
+        self.customerid = customerid
+        self.budget = 100
+
+# Creating class for returning customers
+
+class Returning_customer(Customer):
+    def __init__(self, customerid, budget):
+        self.customerid = customerid
+        self.budget = budget
+
+# Creating class for regular one time customers
+
+class Regular_one_time_customer(One_time_customer):
+    def __init__(self, customerid, budget):
+        self.customerid = customerid
+        self.budget = budget
+
+# Creating class for one time customers who have found the place through Tripadvisor
+# and randomising their tip between 1 to 10 euros
+
+class Tripadvisor_one_time_customer(One_time_customer):
+    def __init__(self, customerid, budget, tip):
+        self.customerid = customerid
+        self.budget = budget
+        self.tip = random.randint(1, 10)
+        print(tip)
+
+# Creating class for regular returning customers, setting their budget to 250
+
+class Regular_returning_customer(Returning_customer):
+    def __init__(self, customerid, budget):
+        self.customerid = customerid
+        self.budget = 250
+
+# Creating class for hipsters, setting their budget to 500
+
+class Hipsters(Returning_customer):
+    def __init__(self, customerid, budget):
+        self.customerid = customerid
+        self.budget = 500
+
+
+class Food(object):
+    def __init__(self, type):
+        self.type = list_drinks
+
+
+class Drinks(object):
+    def __init__(self, type):
+        self.type = list_drinks
+
+
+##### For starters #####
+
+# First off, we need to load the dataset from our working directory
+coffeebardataset = pd.read_csv("Coffeebar_2013-2017.csv", delimiter=";", header=0)
+# Let us import the variable TIME into coffeebardataset_timeNdate from coffeebardataset
+coffeebardataset_timeNdate = coffeebardataset[['TIME']].copy()
+# Let us separate TIME into DATE and TIME
+coffeebardataset_timeNdate = pd.DataFrame(coffeebardataset_timeNdate.TIME.str.split(' ', 1).tolist(), columns=['DATE', 'TIME'])
+# Let us now separate DATE into YEAR MONTH DAY. However, this will erase TIME
+coffeebardataset_timeNdate = pd.DataFrame(coffeebardataset_timeNdate.DATE.str.split('-').tolist(), columns=['YEAR', 'MONTH', 'DAY'])
+# Let us introduce new dates in order to perform the five-year simulation
+coffeebardataset_timeNdate['YEAR'] = coffeebardataset_timeNdate['YEAR'].replace("2013", "2018")
+coffeebardataset_timeNdate['YEAR'] = coffeebardataset_timeNdate['YEAR'].replace("2014", "2019")
+coffeebardataset_timeNdate['YEAR'] = coffeebardataset_timeNdate['YEAR'].replace("2015", "2020")
+coffeebardataset_timeNdate['YEAR'] = coffeebardataset_timeNdate['YEAR'].replace("2016", "2021")
+coffeebardataset_timeNdate['YEAR'] = coffeebardataset_timeNdate['YEAR'].replace("2017", "2022")
+# We need to reintroduce DATE since it has been previously dropped
+coffeebardataset_timeNdate['DATE'] = coffeebardataset_timeNdate['YEAR'] + '-' + coffeebardataset_timeNdate['MONTH'] + '-' + coffeebardataset_timeNdate['DAY']
+# Furthermore, we need to remove the first three columns
+coffeebardataset_timeNdate = coffeebardataset_timeNdate.drop(coffeebardataset_timeNdate.columns[[0, 1, 2]], axis=1)
+
+# We also need to reintroduce TIME to coffeebardataset_timeNdate since it has been previously dropped
+coffeebardataset_timeNdate['TIME'] = coffeebardataset['TIME']
+coffeebardataset_timeNdate['TIME'] = pd.to_datetime(coffeebardataset_timeNdate.TIME)
+# We can now extract the aforementioned TIME variable
+coffeebardataset_timeNdate['TIME'] = coffeebardataset_timeNdate.TIME.dt.time
+
+# Merging drinks and food
+count_drinkable.index = count_drinkable.index.set_names(['TIME'])
+count_food.index = count_food.index.set_names(['TIME'])
+# Let us now redefine the index
+count_drinkable.reset_index(inplace=True)
+count_food.reset_index(inplace=True)
+
+coffeebardataset_timeNdate = pd.merge(coffeebardataset_timeNdate, count_drinkable, on='TIME')
+coffeebardataset_timeNdate = pd.merge(coffeebardataset_timeNdate, count_food, on='TIME')
+coffeebardataset_timeNdate = pd.DataFrame(coffeebardataset_timeNdate.sort_values(by=['DATE', 'TIME']))
+# Let us now remove useless columns
+coffeebardataset_timeNdate = coffeebardataset_timeNdate.drop(coffeebardataset_timeNdate.columns[[8, 9, 15]], axis=1)
+# We need to reset the index of coffeebardataset_timeNdate
+coffeebardataset_timeNdate = coffeebardataset_timeNdate.reset_index()
+# We also need to remove the first column from coffeebardataset_timeNdate
+coffeebardataset_timeNdate = coffeebardataset_timeNdate.drop(coffeebardataset_timeNdate.columns[[0]], axis=1)
+
+# For simulation purposes, we can generate the following list which simulates a food order
+LIST_food = ['pie', 'muffin', 'cookie', 'sandwich', 'nothing']
+
+# We will introduce a function which selects a food order with the probabilities computed in part one
+
+
+def food_consumption_choice(probability):
+    food_choice = np.random.choice(LIST_food, p=probability)
+    return food_choice
+
+
+coffeebardataset_timeNdate['food_choice'] = 0
+# Put the aforementioned function into practice; this function assigns probabilities
+for i in range(len(coffeebardataset_timeNdate)):
+    probability_x1 = [coffeebardataset_timeNdate['sandwich'][i], coffeebardataset_timeNdate['muffin'][i], coffeebardataset_timeNdate['cookie'][i],
+               coffeebardataset_timeNdate['pie'][i], coffeebardataset_timeNdate['nothing'][i]]
+    coffeebardataset_timeNdate['food_choice'][i] = food_consumption_choice(probability_x1)
+    print(i)
+
+
+# For simulation purposes, we can generate the following list which simulates a drink order
+LIST_drinks = ['water', 'frappucino', 'soda', 'tea', 'coffee', 'milkshake']
+
+
+def drinkable_consumption_choice(probability):
+    drinkable_choice = np.random.choice(LIST_drinks, p=probability)
+    return drinkable_choice
+
+
+coffeebardataset_timeNdate['drinkable_choice'] = 0
+# Put the aforementioned function into practice; this function assigns probabilities
+for i in range(len(coffeebardataset_timeNdate)):
+    probability_x2 = [coffeebardataset_timeNdate['coffee'][i], coffeebardataset_timeNdate['frappucino'][i], coffeebardataset_timeNdate['milkshake'][i],
+               coffeebardataset_timeNdate['soda'][i], coffeebardataset_timeNdate['tea'][i], coffeebardataset_timeNdate['water'][i]]
+    coffeebardataset_timeNdate['drinkable_choice'][i] = drinkable_consumption_choice(probability_x2)
+    print(i)
+
+
+# Let us now introduce prices for food ordered by customers
+# We can set this price to 100 on purpose, to check if this would be in line with or model or not
+coffeebardataset_timeNdate['price_food_choice'] = 100
+# We need to create dummies if we want to code the variable LIST_food and its loop
+# The first step is to ensure that variables are strings
+coffeebardataset_timeNdate['price_food_choice'] = coffeebardataset_timeNdate['food_choice'].astype(str)
+# The second step is to introduce dummies which will be stored in dummies_food
+dummies_food = coffeebardataset_timeNdate.price_food_choice.str.get_dummies()
+dummies_food.columns = ['is_' + col for col in dummies_food.columns]
+
+# In order to proceed any further, we must remove the first column
+dummies_food = dummies_food.drop(dummies_food.columns[0], axis=1)
+
+# The third step is to concatenate coffeebardataset_timeNdate and dummies_food, i.e. we link them together
+coffeebardataset_timeNdate = pd.concat([coffeebardataset_timeNdate, dummies_food], axis=1)
+
+# We will now replace price_food_choice by the price of the food that has been ordered
+for i in range(len(coffeebardataset_timeNdate)):
+    if coffeebardataset_timeNdate['is_nothing'][i] == 1:
+        coffeebardataset_timeNdate['price_food_choice'][i] = 0
+    if coffeebardataset_timeNdate['is_sandwich'][i] == 1:
+        coffeebardataset_timeNdate['price_food_choice'][i] = 5
+    if coffeebardataset_timeNdate['is_muffin'][i] == 1:
+        coffeebardataset_timeNdate['price_food_choice'][i] = 3
+    if coffeebardataset_timeNdate['is_cookie'][i] == 1:
+        coffeebardataset_timeNdate['price_food_choice'][i] = 2
+    if coffeebardataset_timeNdate['is_pie'][i] == 1:
+        coffeebardataset_timeNdate['price_food_choice'][i] = 3
+    print([i])
+
+# Here we will convert price_food_choice values to integers since prices only vary in euros, not in cents
+coffeebardataset_timeNdate['price_food_choice'] = coffeebardataset_timeNdate['price_food_choice'].astype(int)
+# Dummies are now no longer relevant so we can dispose of them with the following code
+coffeebardataset_timeNdate = coffeebardataset_timeNdate.drop(coffeebardataset_timeNdate.columns[[17, 18, 19, 20, 21]], axis=1)
+
+# Let us now introduce prices for drinks ordered by customers
+# We can set this price to 100 on purpose, to check if this would be in line with or model or not
+coffeebardataset_timeNdate['price_drink_choice'] = 99
+# The first step is to ensure that variables are strings
+coffeebardataset_timeNdate['price_drink_choice'] = coffeebardataset_timeNdate['drinkable_choice'].astype(str)
+# The second step is to introduce dummies which will be stored in dummies_drinks
+dummies_drinks = coffeebardataset_timeNdate.price_drink_choice.str.get_dummies()
+dummies_drinks.columns = ['is_' + col for col in dummies_drinks.columns]
+
+# In order to proceed any further, we must remove the first column
+dummies_drinks = dummies_drinks.drop(dummies_drinks.columns[[0]], axis=1)
+
+# The third step is to concatenate coffeebardataset_timeNdate and dummies_drinks, i.e. we link them together
+coffeebardataset_timeNdate = pd.concat([coffeebardataset_timeNdate, dummies_drinks], axis=1)
+
+
+# We will now replace price_food_choice by the price of the drink that has been ordered
+for i in range(len(coffeebardataset_timeNdate)):
+    if coffeebardataset_timeNdate['is_coffee'][i] == 1:
+        coffeebardataset_timeNdate['price_drink_choice'][i] = 3
+    if coffeebardataset_timeNdate['is_soda'][i] == 1:
+        coffeebardataset_timeNdate['price_drink_choice'][i] = 3
+    if coffeebardataset_timeNdate['is_milkshake'][i] == 1:
+        coffeebardataset_timeNdate['price_drink_choice'][i] = 5
+    if coffeebardataset_timeNdate['is_frappucino'][i] == 1:
+        coffeebardataset_timeNdate['price_drink_choice'][i] = 4
+    if coffeebardataset_timeNdate['is_water'][i] == 1:
+        coffeebardataset_timeNdate['price_drink_choice'][i] = 2
+    if coffeebardataset_timeNdate['is_tea'][i] == 1:
+        coffeebardataset_timeNdate['price_drink_choice'][i] = 3
+    print([i])
+
+# Dummies are now no longer relevant so we can dispose of them with the following code
+coffeebardataset_timeNdate = coffeebardataset_timeNdate.drop(coffeebardataset_timeNdate.columns[[18, 19, 20, 21, 22, 23]], axis=1)
+
+# Here we will convert price_drink_choice values to integers since prices only vary in euros, not in cents
+coffeebardataset_timeNdate['price_drink_choice'] = coffeebardataset_timeNdate['price_drink_choice'].astype(int)
+
+# Simulations for customers
+# First of all, let us introduce a pool of 1000 returning customers
+coffeebardataset_timeNdate['ID'] = 0
+coffeebardataset_timeNdate['TYPE'] = "0"
+coffeebardataset_timeNdate['SUBTYPE'] = "0"
+# We must ensure to define all possible types and subtypes for these customers
+vector_type = ['1T', 'R']
+vector_subtype_R = ['Hipster', 'RegR']
+vector_subtype_1T = ['Reg1T', 'Tripadvisor']
+
+# From vector type, we draw one-time customers with probability 0.8 and returning customers with probability 0.2
+# From vector_subtype_1T, we draw regular one-time customers with probability 0.9 and Tripadvisor customers with
+# probability 0.1
+# From vector_subtype_R, we draw Hipters with probability 1/3 and regular returning customers with probability 2/3
+
+for i in range(len(coffeebardataset_timeNdate)):
+    coffeebardataset_timeNdate['TYPE'][i] = np.random.choice(a=vector_type, p=(0.8, 0.2))
+    if coffeebardataset_timeNdate['TYPE'][i] == "1T":
+        coffeebardataset_timeNdate['SUBTYPE'][i] = np.random.choice(a=vector_subtype_1T, p=(0.9, 0.1))
+    print([i])
+
+# We must generate a unique ID for each returning customer
+# Since there are 1000 customers each ID will be an integer between 1 and 1000
+for i in range(len(coffeebardataset_timeNdate)):
+    if coffeebardataset_timeNdate['TYPE'][i] == "R":
+        coffeebardataset_timeNdate['ID'][i] = np.random.randint(0, 1000)
+    print([i])
+
+# We must also generate a random ID for each one-time customer
+# In order to safely account for each one-time customer, we let each of their IDs span between 10000000 and 99999999
+for i in range(len(coffeebardataset_timeNdate)):
+    if coffeebardataset_timeNdate['TYPE'][i] == "1T":
+        coffeebardataset_timeNdate['ID'][i] = np.random.randint(10000000, 99999999)
+    print([i])
+
+# One third of the 1000 returning customers are Hipsters, i.e. there are 333 Hipsters
+# For simplicity measures, we assume that the first 333 customers are all Hipsters
+# The other 667 customers are regular returners, which are denoted by Regular further in the code
+for i in range(len(coffeebardataset_timeNdate)):
+    if coffeebardataset_timeNdate['TYPE'][i] == "R":
+        if coffeebardataset_timeNdate['ID'][i] < 334:
+            coffeebardataset_timeNdate['SUBTYPE'][i] = "Hipster"
+        else:
+            coffeebardataset_timeNdate['SUBTYPE'][i] = "Regular"
+    print([i])
+
+
+# We must now account for the fact that one-time customers issue a tip
+# For computational measures, we set the initial tip of every customer equal to zero
+coffeebardataset_timeNdate['TIP'] = 0
+# If customers prove to be one-time customers, we assign a random integer between 1 and 10 instead of this null tip
+for i in range(len(coffeebardataset_timeNdate)):
+    if coffeebardataset_timeNdate['SUBTYPE'][i] == "Tripadvisor":
+        coffeebardataset_timeNdate['TIP'][i] = np.random.randint(1, 10)
+    print([i])
+
+# The simulations require us to assign a budget to each customer
+# We shall therefore introduce an empty column for BUDGET in coffeebardataset_timeNdate
+coffeebardataset_timeNdate['BUDGET'] = 0
+# We shall also attribute budget to customers accordingly; i.e. it must depend on their type and subtype
+for i in range(len(coffeebardataset_timeNdate)):
+    if coffeebardataset_timeNdate['SUBTYPE'][i] == "Hipster":
+        coffeebardataset_timeNdate['BUDGET'][i] = 500
+    if coffeebardataset_timeNdate['SUBTYPE'][i] == "Regular":
+        coffeebardataset_timeNdate['BUDGET'][i] = 250
+    if coffeebardataset_timeNdate['TYPE'][i] == "1T":
+        coffeebardataset_timeNdate['BUDGET'][i] = 100
+    print([i])
+
+# We need to figure out the number of visits each client pays to the coffee bar
+number_of_visits = coffeebardataset_timeNdate.ID.value_counts()
+# Let us reset the index
+number_of_visits = number_of_visits.reset_index()
+# We also need to rename the columns
+number_of_visits.columns = ['ID', 'number_of_visits']
+# Let us now merge the aforementioned columns into coffeebardataset_timeNdate
+coffeebardataset_timeNdate = pd.merge(coffeebardataset_timeNdate, number_of_visits, on='ID')
+
+# Let us now introduce a new variable total_order_price accounting for what the customer pays each time he visits the
+# coffee bar. This amounts to computing the sum of prices of both the food and the drink he orders
+coffeebardataset_timeNdate['total_order_price'] = coffeebardataset_timeNdate['price_food_choice'] + coffeebardataset_timeNdate['price_drink_choice']
+# Let us also introduce another new variable sum_expenses as the sum of of total_order_price for each customer, i.e. cumulated total_order_price
+sum_expenses = coffeebardataset_timeNdate.groupby('ID')[["total_order_price"]].sum()
+# Let us reset the index
+sum_expenses = sum_expenses.reset_index()
+# We also need to rename columns
+sum_expenses.columns = ['ID', 'total_expenses']
+# Let us now merge the aforementioned columns into coffeebardataset_timeNdate
+coffeebardataset_timeNdate = pd.merge(coffeebardataset_timeNdate, sum_expenses, on='ID')
+# We must convert these columns to integers
+coffeebardataset_timeNdate['total_expenses'] = coffeebardataset_timeNdate['total_expenses'].astype(int)
+
+# Let us add another variable, the residual budget i.e. the customer's budget after each of his orders
+# To begin with and for computational measures, we set this residual budget equal to the starting budget
+coffeebardataset_timeNdate['RESIDUAL_BUDGET'] = coffeebardataset_timeNdate['BUDGET']
+# The residual budget corresponds to the starting budget, minus what the customer pays for his order, minus his tip if
+# he decides to issue one
+coffeebardataset_timeNdate['RESIDUAL_BUDGET'] = coffeebardataset_timeNdate['BUDGET'] - coffeebardataset_timeNdate['total_expenses'] - coffeebardataset_timeNdate['TIP']
+
+# Returning customers will not come back to the coffee bar if their budget is inferior to the combined price of the most
+# expensive food and drink which can be bought. The most expensive food and drink are both equal to 5.
+# Therefore, returning customers will not come back if their budget < 10
+# Assuming returning customers always return to the coffee bar provided their budgets allows them to do so,
+# we know that customers who do not come back despite having a budget > 10 are one-time customers.
+# The subtype of customers is drawn at random using the probabilities we assigned earlier into vector_subtype_1T
+for i in range(len(coffeebardataset_timeNdate)):
+    if coffeebardataset_timeNdate['RESIDUAL_BUDGET'][i] < 10:
+        coffeebardataset_timeNdate['TYPE'][i] = "1T"
+        coffeebardataset_timeNdate['SUBTYPE'][i] = np.random.choice(vector_subtype_1T, p=(0.9, 0.1))
+    print([i])
+
+# We must now reassign new budgets to these returning customers
+for i in range(len(coffeebardataset_timeNdate)):
+    if coffeebardataset_timeNdate['SUBTYPE'][i] == "Hipster":
+            coffeebardataset_timeNdate['BUDGET'][i] = 500
+    if coffeebardataset_timeNdate['SUBTYPE'][i] == "Regular":
+            coffeebardataset_timeNdate['BUDGET'][i] = 250
+    if coffeebardataset_timeNdate['TYPE'][i] == "1T":
+            coffeebardataset_timeNdate['BUDGET'][i] = 100
+    print([i])
+
+# We must also reassign new tips to these returning customers
+coffeebardataset_timeNdate['TIP'] = 0
+for i in range(len(coffeebardataset_timeNdate)):
+    if coffeebardataset_timeNdate['SUBTYPE'][i] == "Tripadvisor":
+        coffeebardataset_timeNdate['TIP'][i] = np.random.randint(1, 10)
+    print([i])
+
+sum_expenses = coffeebardataset_timeNdate.groupby('ID')[["total_order_price"]].sum()
+sum_expenses = sum_expenses.reset_index()
+sum_expenses.columns = ['ID', 'total_expenses']
+coffeebardataset_timeNdate_final = pd.merge(coffeebar_timeNdate, sum_expenses, on='ID')
+
+coffeebardataset_timeNdate_final['total_expenses_y'] = coffeebardataset_timeNdate_final['total_expenses_y'].astype(int)
+coffeebardataset_timeNdate_final['RESIDUAL_BUDGET'] = coffeebardataset_timeNdate_final['BUDGET'] - coffeebardataset_timeNdate_final['total_expenses_y'] - coffeebardataset_timeNdate_final['TIP']
+
+##### Plotting the graphs #####
+
+# Density plots
+
+# Frappucino density plot
+# First, we need to import seaborn as sns
+import seaborn as sns
+sns.kdeplot(COFF['frappucino'])
+plt.title('Density for frappucino')
+
+# Sandwich density plot
+sns.kdeplot(coffeebardataset_timeNdate['sandwich'], color='green')
+plt.title('Density for sandwich')
+
+
+# Let us reduce our study to a subsample of our dataframe, e.g. 2015 only
+# We will restrict ourselves to this dataframe to plot our graphs
+coffeebardataset_timeNdate_2015 = coffeebardataset_timeNdate_final.iloc[124832:187246, :]
+
+# Carrying out some summary statistics for some variables of interest
+pd.DataFrame.describe(coffeebardataset_timeNdate_2015['total_expenses_y'])
+pd.DataFrame.describe(coffeebardataset_timeNdate_2015['BUDGET'])
+pd.DataFrame.describe(coffeebardataset_timeNdate_2015['RESIDUAL_BUDGET'])
+
+# Let us set INCOME which will b a new dataframe containing the sum of all the coffee bar's sales per day
+INCOME = coffeebardataset_timeNdate_final.groupby('DATE')[["total_order_price"]].sum()
+# Let us reset the index
+INCOME = INCOME.reset_index()
+# We must convert DATE to a datetime type
+INCOME['DATE'] = pd.to_datetime(INCOME.DATE)
+
+# We would like to only extract the year
+INCOME['YEAR'] = INCOME.DATE.dt.year
+INCOME['DATE'] = INCOME.DATE.dt.date
+
+# Plotting the graphs
+plt.plot(INCOME['DATE'], INCOME['total_order_price'], color='red')
+plt.xlabel('Days of 2018')
+plt.ylabel('Income earned by the coffeebar')
+plt.title('Daily income for year 2018')
+
+sum_expenses = coffeebardataset_timeNdate.groupby('ID')[["total_order_price"]].sum()
+
+# Finding out the proportion of each type of customers
+pd.DataFrame.describe(coffeebardataset_timeNdate['TYPE'])
+pd.DataFrame.describe(coffeebardataset_timeNdate['SUBTYPE'])
+
+# Carrying out some summary statistics regarding the number of visits
+pd.DataFrame.describe(coffeebardataset_timeNdate_final['number_of_visits'])
+
+
+
